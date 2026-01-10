@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "src/**/*",
+    "test/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "lib"
+  ],
+  "compilerOptions": {
+    "outDir": "./lib",
+    "rootDir": ".",
+    "noEmit": true,
+    "types": [
+      "bun-types"
+    ]
+  },
+}

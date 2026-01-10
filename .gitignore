@@ -1,0 +1,12 @@
+# Build output
+lib/
+
+# Generated WASM (compiled from C, not committed)
+src/swisseph.wasm
+
+# Dependencies
+node_modules/
+
+# Build artifacts
+*.o
+*.a

@@ -1,0 +1,63 @@
+# Makefile for compiling Swiss Ephemeris to WebAssembly
+# Requires Emscripten SDK (emsdk)
+#
+# This builds a standalone WASM module without JavaScript glue.
+# The TypeScript code loads it directly via WebAssembly.instantiate().
+
+EMCC = emcc
+
+# Compiler flags
+CFLAGS = -O3 -Wall -DNDEBUG
+
+# Object files for the Swiss Ephemeris library
+SWEOBJ = swedate.o swehouse.o swejpl.o swemmoon.o swemplan.o sweph.o \
+         swephlib.o swecl.o swehel.o
+
+# Emscripten flags for standalone WASM library (no JS glue)
+EMFLAGS = \
+	-s STANDALONE_WASM=1 \
+	-s PURE_WASI=1 \
+	--no-entry \
+	-s ALLOW_MEMORY_GROWTH=1 \
+	-s EXPORTED_FUNCTIONS='[ \
+		"_malloc", \
+		"_free", \
+		"_swe_calc_ut", \
+		"_swe_julday", \
+		"_swe_revjul", \
+		"_swe_houses_ex", \
+		"_swe_close", \
+		"_swe_set_sid_mode", \
+		"_swe_get_ayanamsa_ut", \
+		"_swe_get_planet_name", \
+		"_swe_set_topo", \
+		"_swe_sidtime", \
+		"_swe_degnorm" \
+	]' \
+	-s STACK_SIZE=1048576
+
+all: src/swisseph.wasm
+
+# Build object files
+%.o: %.c
+	$(EMCC) $(CFLAGS) -c $< -o $@
+
+# Build standalone WASM into src/
+src/swisseph.wasm: $(SWEOBJ)
+	$(EMCC) $(CFLAGS) $(EMFLAGS) $(SWEOBJ) -o src/swisseph.wasm
+
+clean:
+	rm -f *.o src/swisseph.wasm
+
+# Dependency rules
+swecl.o: swejpl.h sweodef.h swephexp.h swedll.h sweph.h swephlib.h
+swedate.o: swephexp.h sweodef.h swedll.h
+swehel.o: swephexp.h sweodef.h swedll.h
+swehouse.o: swephexp.h sweodef.h swedll.h swephlib.h swehouse.h
+swejpl.o: swephexp.h sweodef.h swedll.h sweph.h swejpl.h
+swemmoon.o: swephexp.h sweodef.h swedll.h sweph.h swephlib.h
+swemplan.o: swephexp.h sweodef.h swedll.h sweph.h swephlib.h swemptab.h
+sweph.o: swejpl.h sweodef.h swephexp.h swedll.h sweph.h swephlib.h
+swephlib.o: swephexp.h sweodef.h swedll.h sweph.h swephlib.h
+
+.PHONY: all clean

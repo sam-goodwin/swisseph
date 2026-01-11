@@ -10,3 +10,4 @@ node_modules/
 # Build artifacts
 *.o
 *.a
+*.tsbuildinfo

@@ -125,7 +125,7 @@ export type MemoryHelpers = ReturnType<typeof createMemoryHelpers>;
 export function withErrorBuffer<T>(
   swe: SwissEphWasm,
   bufferSize: number,
-  fn: (serrPtr: number) => T
+  fn: (serrPtr: number) => T,
 ): { value: T; error?: string } {
   const mem = createMemoryHelpers(swe);
   const serrPtr = swe.malloc(bufferSize);

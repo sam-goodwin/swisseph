@@ -12,6 +12,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
+import { functionConfig, type FunctionConfig, type OutputType } from "./function-config.js";
 
 const HEADER_PATH = join(dirname(import.meta.dir), "swephexp.h");
 const OUTPUT_DIR = join(dirname(import.meta.dir), "src", "generated");
@@ -571,7 +572,604 @@ function generateIndex(): string {
 
 export * from "./constants.js";
 export * from "./functions.js";
+export * from "./friendly.js";
 `;
+}
+
+// ============================================================================
+// FRIENDLY WRAPPER GENERATION
+// ============================================================================
+
+function generateFriendlyWrappers(functions: FunctionDecl[]): string {
+  const lines: string[] = [
+    "/**",
+    " * Swiss Ephemeris Friendly API",
+    " * Auto-generated - DO NOT EDIT",
+    " *",
+    " * Provides TypeScript-friendly wrappers around the raw WASM interface.",
+    " * Handles memory allocation/deallocation automatically.",
+    " */",
+    "",
+    'import type { SwissEphWasm } from "./functions.js";',
+    'import { loadSwissEph } from "../loader.js";',
+    'import { createMemoryHelpers, type MemoryHelpers } from "../helpers.js";',
+    "",
+  ];
+
+  // Generate result type interfaces
+  lines.push(...generateResultTypes());
+  lines.push("");
+
+  // Generate the factory function
+  lines.push("/**");
+  lines.push(" * Create a Swiss Ephemeris instance with friendly API.");
+  lines.push(" *");
+  lines.push(" * All functions handle memory management automatically.");
+  lines.push(" * Call close() when done to free resources.");
+  lines.push(" *");
+  lines.push(" * @example");
+  lines.push(" * ```ts");
+  lines.push(' * const swe = await createSwissEph();');
+  lines.push(" * const jd = swe.julday(2024, 1, 1, 12.0);");
+  lines.push(" * const sun = swe.calc(jd, SE_SUN, SEFLG_SPEED);");
+  lines.push(" * console.log(sun.longitude);");
+  lines.push(" * swe.close();");
+  lines.push(" * ```");
+  lines.push(" */");
+  lines.push("export async function createSwissEph() {");
+  lines.push("  const raw = await loadSwissEph();");
+  lines.push("  const mem = createMemoryHelpers(raw);");
+  lines.push("");
+  lines.push("  return {");
+
+  // Generate each wrapper function
+  for (const fn of functions) {
+    const config = functionConfig[fn.name] || { friendlyName: fn.name.replace("swe_", "") };
+    if (config.skip) continue;
+
+    const wrapperCode = generateWrapperFunction(fn, config);
+    lines.push(...wrapperCode.map(l => "    " + l));
+    lines.push("");
+  }
+
+  // Add raw access
+  lines.push("    /** Access raw WASM interface for advanced usage */");
+  lines.push("    raw,");
+  lines.push("");
+  lines.push("    /** Memory helpers for advanced usage */");
+  lines.push("    mem,");
+
+  lines.push("  };");
+  lines.push("}");
+  lines.push("");
+  lines.push("export type SwissEph = Awaited<ReturnType<typeof createSwissEph>>;");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+function generateResultTypes(): string[] {
+  return [
+    "// Result Types",
+    "",
+    "export interface PlanetPosition {",
+    "  longitude: number;",
+    "  latitude: number;",
+    "  distance: number;",
+    "  longitudeSpeed: number;",
+    "  latitudeSpeed: number;",
+    "  distanceSpeed: number;",
+    "}",
+    "",
+    "export interface DateComponents {",
+    "  year: number;",
+    "  month: number;",
+    "  day: number;",
+    "  hour: number;",
+    "}",
+    "",
+    "export interface UtcComponents {",
+    "  year: number;",
+    "  month: number;",
+    "  day: number;",
+    "  hour: number;",
+    "  minute: number;",
+    "  second: number;",
+    "}",
+    "",
+    "export interface HouseResult {",
+    "  cusps: number[];",
+    "  ascendant: number;",
+    "  mc: number;",
+    "  armc: number;",
+    "  vertex: number;",
+    "  equatorialAscendant: number;",
+    "  coAscendantKoch: number;",
+    "  coAscendantMunkasey: number;",
+    "  polarAscendant: number;",
+    "}",
+    "",
+    "export interface HouseResultWithSpeed extends HouseResult {",
+    "  cuspSpeeds: number[];",
+    "  ascmcSpeeds: number[];",
+    "}",
+    "",
+    "export interface SplitDegrees {",
+    "  degrees: number;",
+    "  minutes: number;",
+    "  seconds: number;",
+    "  secondFraction: number;",
+    "  sign: number;",
+    "}",
+    "",
+    "export interface JulianDayResult {",
+    "  et: number;",
+    "  ut: number;",
+    "}",
+    "",
+    "export interface AzimuthAltitude {",
+    "  azimuth: number;",
+    "  trueAltitude: number;",
+    "  apparentAltitude: number;",
+    "}",
+    "",
+    "export interface PhenomenaResult {",
+    "  phaseAngle: number;",
+    "  phase: number;",
+    "  elongation: number;",
+    "  apparentDiameter: number;",
+    "  apparentMagnitude: number;",
+    "}",
+    "",
+    "export interface NodesApsidesResult {",
+    "  ascendingNode: PlanetPosition;",
+    "  descendingNode: PlanetPosition;",
+    "  perihelion: PlanetPosition;",
+    "  aphelion: PlanetPosition;",
+    "}",
+    "",
+    "export interface EclipseTimeResult {",
+    "  times: number[];",
+    "  attributes?: number[];",
+    "}",
+    "",
+    "export interface EclipseWhereResult {",
+    "  geopos: number[];",
+    "  attributes: number[];",
+    "}",
+    "",
+    "export interface EclipseAttributes {",
+    "  attributes: number[];",
+    "}",
+    "",
+    "export interface OrbitalElements {",
+    "  elements: number[];",
+    "}",
+  ];
+}
+
+function generateWrapperFunction(fn: FunctionDecl, config: FunctionConfig): string[] {
+  const lines: string[] = [];
+  const friendlyName = config.friendlyName || fn.name.replace("swe_", "");
+  const outputs = config.outputs || {};
+  const inputStrings = config.inputStrings || [];
+  const returnType = config.returnType || "number";
+
+  // Build the function signature
+  const inputParams = fn.params.filter(p => !outputs[p.name]);
+  const signature = buildSignature(inputParams, inputStrings, config, returnType, outputs);
+  
+  // JSDoc comment
+  if (config.description) {
+    lines.push(`/** ${config.description} */`);
+  }
+
+  lines.push(`${friendlyName}: ${signature} => {`);
+
+  // Generate memory allocations for outputs
+  const allocations: string[] = [];
+  const frees: string[] = [];
+  const outputReads: { param: string; type: OutputType; varName: string }[] = [];
+
+  for (const [paramName, outputType] of Object.entries(outputs)) {
+    const varName = `${paramName}Ptr`;
+    const size = getOutputSize(outputType);
+    allocations.push(`const ${varName} = raw.malloc(${size});`);
+    frees.push(`raw.free(${varName});`);
+    outputReads.push({ param: paramName, type: outputType, varName });
+  }
+
+  // Allocate input strings
+  for (const paramName of inputStrings) {
+    const varName = `${paramName}Ptr`;
+    allocations.push(`const ${varName} = mem.allocString(${paramName});`);
+    frees.push(`raw.free(${varName});`);
+  }
+
+  // Add allocations
+  for (const alloc of allocations) {
+    lines.push(`  ${alloc}`);
+  }
+
+  if (allocations.length > 0) {
+    lines.push("  try {");
+  }
+
+  // Call the raw function
+  const callArgs = fn.params.map(p => {
+    if (outputs[p.name]) return `${p.name}Ptr`;
+    if (inputStrings.includes(p.name)) return `${p.name}Ptr`;
+    // Convert hsys from string to char code if needed
+    if (p.name === "hsys") return `(typeof hsys === "string" ? hsys.charCodeAt(0) : hsys)`;
+    return p.name;
+  }).join(", ");
+
+  const indent = allocations.length > 0 ? "    " : "  ";
+
+  if (returnType === "void") {
+    lines.push(`${indent}raw.${fn.name}(${callArgs});`);
+  } else {
+    lines.push(`${indent}const ret = raw.${fn.name}(${callArgs});`);
+  }
+
+  // Check for errors
+  if (returnType === "check-negative" || returnType === "check-error") {
+    const errorRead = outputReads.find(o => o.type.type === "error");
+    if (errorRead) {
+      lines.push(`${indent}if (ret < 0) {`);
+      lines.push(`${indent}  const errMsg = mem.getString(${errorRead.varName});`);
+      lines.push(`${indent}  throw new Error(errMsg || "Swiss Ephemeris error");`);
+      lines.push(`${indent}}`);
+    }
+  }
+
+  // Build the return value
+  const returnCode = buildReturnValue(outputReads, config, returnType, indent);
+  lines.push(...returnCode);
+
+  // Add finally block if we have allocations
+  if (allocations.length > 0) {
+    lines.push("  } finally {");
+    for (const free of frees) {
+      lines.push(`    ${free}`);
+    }
+    lines.push("  }");
+  }
+
+  lines.push("},");
+
+  return lines;
+}
+
+function buildSignature(
+  inputParams: FunctionParam[],
+  inputStrings: string[],
+  config: FunctionConfig,
+  returnType: string,
+  outputs: Record<string, OutputType>
+): string {
+  const params = inputParams.map(p => {
+    if (inputStrings.includes(p.name)) {
+      return `${p.name}: string`;
+    }
+    // Special case for hsys - it can be a number or single char
+    if (p.name === "hsys") {
+      return `${p.name}: number | string`;
+    }
+    return `${p.name}: number`;
+  });
+
+  let resultType = "void";
+  if (returnType === "number") {
+    if (Object.keys(outputs).length === 0) {
+      resultType = "number";
+    } else {
+      resultType = inferResultType(config, outputs);
+    }
+  } else if (returnType === "check-negative" || returnType === "check-error") {
+    resultType = inferResultType(config, outputs);
+  } else if (returnType === "void") {
+    if (Object.keys(outputs).length > 0) {
+      resultType = inferResultType(config, outputs);
+    }
+  }
+
+  return `(${params.join(", ")}): ${resultType}`;
+}
+
+function inferResultType(config: FunctionConfig, outputs: Record<string, OutputType>): string {
+  if (config.resultType) return config.resultType;
+  
+  // Single output
+  const outputEntries = Object.entries(outputs).filter(([_, t]) => t.type !== "error");
+  if (outputEntries.length === 1) {
+    const [_, type] = outputEntries[0];
+    if (type.type === "float64" || type.type === "int32") return "number";
+    if (type.type === "string") return "string";
+    if (type.type === "float64[]" || type.type === "int32[]") return "number[]";
+  }
+
+  // Multiple outputs - return an object
+  return "{ " + outputEntries.map(([name, type]) => {
+    const tsType = type.type.includes("[]") ? "number[]" : 
+                   type.type === "string" ? "string" : "number";
+    const propName = (type as any).name || name;
+    return `${propName}: ${tsType}`;
+  }).join("; ") + " }";
+}
+
+function getOutputSize(type: OutputType): string {
+  switch (type.type) {
+    case "float64":
+      return "8";
+    case "float64[]":
+      return `${type.count} * 8`;
+    case "int32":
+      return "4";
+    case "int32[]":
+      return `${type.count} * 4`;
+    case "string":
+    case "error":
+      return `${type.size}`;
+    default:
+      return "8";
+  }
+}
+
+function buildReturnValue(
+  outputReads: { param: string; type: OutputType; varName: string }[],
+  config: FunctionConfig,
+  returnType: string,
+  indent: string
+): string[] {
+  const lines: string[] = [];
+  const nonErrorOutputs = outputReads.filter(o => o.type.type !== "error");
+
+  // Simple return of the function result
+  if (nonErrorOutputs.length === 0) {
+    if (returnType !== "void") {
+      lines.push(`${indent}return ret;`);
+    }
+    return lines;
+  }
+
+  // Special handling for known result types
+  if (config.resultType === "PlanetPosition") {
+    const xxOutput = outputReads.find(o => o.param === "xx" || o.param === "xxret");
+    if (xxOutput) {
+      lines.push(`${indent}const xx = mem.getFloat64Array(${xxOutput.varName}, 6);`);
+      lines.push(`${indent}return {`);
+      lines.push(`${indent}  longitude: xx[0],`);
+      lines.push(`${indent}  latitude: xx[1],`);
+      lines.push(`${indent}  distance: xx[2],`);
+      lines.push(`${indent}  longitudeSpeed: xx[3],`);
+      lines.push(`${indent}  latitudeSpeed: xx[4],`);
+      lines.push(`${indent}  distanceSpeed: xx[5],`);
+      lines.push(`${indent}};`);
+      return lines;
+    }
+  }
+
+  if (config.resultType === "DateComponents") {
+    lines.push(`${indent}return {`);
+    for (const o of nonErrorOutputs) {
+      const propName = (o.type as any).name || o.param;
+      const readFn = o.type.type === "int32" ? "getInt32" : "getFloat64";
+      lines.push(`${indent}  ${propName}: mem.${readFn}(${o.varName}),`);
+    }
+    lines.push(`${indent}};`);
+    return lines;
+  }
+
+  if (config.resultType === "UtcComponents") {
+    lines.push(`${indent}return {`);
+    for (const o of nonErrorOutputs) {
+      const propName = (o.type as any).name || o.param;
+      const readFn = o.type.type === "int32" ? "getInt32" : "getFloat64";
+      lines.push(`${indent}  ${propName}: mem.${readFn}(${o.varName}),`);
+    }
+    lines.push(`${indent}};`);
+    return lines;
+  }
+
+  if (config.resultType === "SplitDegrees") {
+    lines.push(`${indent}return {`);
+    for (const o of nonErrorOutputs) {
+      const propName = (o.type as any).name || o.param;
+      const readFn = o.type.type === "int32" ? "getInt32" : "getFloat64";
+      lines.push(`${indent}  ${propName}: mem.${readFn}(${o.varName}),`);
+    }
+    lines.push(`${indent}};`);
+    return lines;
+  }
+
+  if (config.resultType === "HouseResult") {
+    const cuspsOutput = outputReads.find(o => o.param === "cusps");
+    const ascmcOutput = outputReads.find(o => o.param === "ascmc");
+    if (cuspsOutput && ascmcOutput) {
+      lines.push(`${indent}const cusps = mem.getFloat64Array(${cuspsOutput.varName}, 13);`);
+      lines.push(`${indent}const ascmc = mem.getFloat64Array(${ascmcOutput.varName}, 10);`);
+      lines.push(`${indent}return {`);
+      lines.push(`${indent}  cusps: cusps.slice(1), // cusps[0] is unused`);
+      lines.push(`${indent}  ascendant: ascmc[0],`);
+      lines.push(`${indent}  mc: ascmc[1],`);
+      lines.push(`${indent}  armc: ascmc[2],`);
+      lines.push(`${indent}  vertex: ascmc[3],`);
+      lines.push(`${indent}  equatorialAscendant: ascmc[4],`);
+      lines.push(`${indent}  coAscendantKoch: ascmc[5],`);
+      lines.push(`${indent}  coAscendantMunkasey: ascmc[6],`);
+      lines.push(`${indent}  polarAscendant: ascmc[7],`);
+      lines.push(`${indent}};`);
+      return lines;
+    }
+  }
+
+  if (config.resultType === "HouseResultWithSpeed") {
+    const cuspsOutput = outputReads.find(o => o.param === "cusps");
+    const ascmcOutput = outputReads.find(o => o.param === "ascmc");
+    const cuspSpeedOutput = outputReads.find(o => o.param === "cusp_speed");
+    const ascmcSpeedOutput = outputReads.find(o => o.param === "ascmc_speed");
+    if (cuspsOutput && ascmcOutput) {
+      lines.push(`${indent}const cusps = mem.getFloat64Array(${cuspsOutput.varName}, 13);`);
+      lines.push(`${indent}const ascmc = mem.getFloat64Array(${ascmcOutput.varName}, 10);`);
+      if (cuspSpeedOutput) {
+        lines.push(`${indent}const cuspSpeeds = mem.getFloat64Array(${cuspSpeedOutput.varName}, 13);`);
+      }
+      if (ascmcSpeedOutput) {
+        lines.push(`${indent}const ascmcSpeeds = mem.getFloat64Array(${ascmcSpeedOutput.varName}, 10);`);
+      }
+      lines.push(`${indent}return {`);
+      lines.push(`${indent}  cusps: cusps.slice(1),`);
+      lines.push(`${indent}  ascendant: ascmc[0],`);
+      lines.push(`${indent}  mc: ascmc[1],`);
+      lines.push(`${indent}  armc: ascmc[2],`);
+      lines.push(`${indent}  vertex: ascmc[3],`);
+      lines.push(`${indent}  equatorialAscendant: ascmc[4],`);
+      lines.push(`${indent}  coAscendantKoch: ascmc[5],`);
+      lines.push(`${indent}  coAscendantMunkasey: ascmc[6],`);
+      lines.push(`${indent}  polarAscendant: ascmc[7],`);
+      if (cuspSpeedOutput) {
+        lines.push(`${indent}  cuspSpeeds: cuspSpeeds.slice(1),`);
+      }
+      if (ascmcSpeedOutput) {
+        lines.push(`${indent}  ascmcSpeeds: Array.from(ascmcSpeeds),`);
+      }
+      lines.push(`${indent}};`);
+      return lines;
+    }
+  }
+
+  if (config.resultType === "JulianDayResult") {
+    const dretOutput = outputReads.find(o => o.param === "dret");
+    if (dretOutput) {
+      lines.push(`${indent}const dret = mem.getFloat64Array(${dretOutput.varName}, 2);`);
+      lines.push(`${indent}return { et: dret[0], ut: dret[1] };`);
+      return lines;
+    }
+  }
+
+  if (config.resultType === "AzimuthAltitude") {
+    const xazOutput = outputReads.find(o => o.param === "xaz");
+    if (xazOutput) {
+      lines.push(`${indent}const xaz = mem.getFloat64Array(${xazOutput.varName}, 3);`);
+      lines.push(`${indent}return { azimuth: xaz[0], trueAltitude: xaz[1], apparentAltitude: xaz[2] };`);
+      return lines;
+    }
+  }
+
+  if (config.resultType === "PhenomenaResult") {
+    const attrOutput = outputReads.find(o => o.param === "attr");
+    if (attrOutput) {
+      lines.push(`${indent}const attr = mem.getFloat64Array(${attrOutput.varName}, 20);`);
+      lines.push(`${indent}return {`);
+      lines.push(`${indent}  phaseAngle: attr[0],`);
+      lines.push(`${indent}  phase: attr[1],`);
+      lines.push(`${indent}  elongation: attr[2],`);
+      lines.push(`${indent}  apparentDiameter: attr[3],`);
+      lines.push(`${indent}  apparentMagnitude: attr[4],`);
+      lines.push(`${indent}};`);
+      return lines;
+    }
+  }
+
+  if (config.resultType === "NodesApsidesResult") {
+    lines.push(`${indent}const xnasc = mem.getFloat64Array(xnascPtr, 6);`);
+    lines.push(`${indent}const xndsc = mem.getFloat64Array(xndscPtr, 6);`);
+    lines.push(`${indent}const xperi = mem.getFloat64Array(xperiPtr, 6);`);
+    lines.push(`${indent}const xaphe = mem.getFloat64Array(xaphePtr, 6);`);
+    lines.push(`${indent}const toPos = (arr: number[]): PlanetPosition => ({`);
+    lines.push(`${indent}  longitude: arr[0], latitude: arr[1], distance: arr[2],`);
+    lines.push(`${indent}  longitudeSpeed: arr[3], latitudeSpeed: arr[4], distanceSpeed: arr[5],`);
+    lines.push(`${indent}});`);
+    lines.push(`${indent}return {`);
+    lines.push(`${indent}  ascendingNode: toPos(Array.from(xnasc)),`);
+    lines.push(`${indent}  descendingNode: toPos(Array.from(xndsc)),`);
+    lines.push(`${indent}  perihelion: toPos(Array.from(xperi)),`);
+    lines.push(`${indent}  aphelion: toPos(Array.from(xaphe)),`);
+    lines.push(`${indent}};`);
+    return lines;
+  }
+
+  if (config.resultType === "OrbitalElements") {
+    const dretOutput = outputReads.find(o => o.param === "dret");
+    if (dretOutput) {
+      lines.push(`${indent}return { elements: mem.getFloat64Array(${dretOutput.varName}, 50) };`);
+      return lines;
+    }
+  }
+
+  if (config.resultType === "EclipseTimeResult") {
+    const tretOutput = outputReads.find(o => o.param === "tret");
+    const attrOutput = outputReads.find(o => o.param === "attr");
+    if (tretOutput) {
+      lines.push(`${indent}const times = mem.getFloat64Array(${tretOutput.varName}, 10);`);
+      if (attrOutput) {
+        lines.push(`${indent}const attributes = mem.getFloat64Array(${attrOutput.varName}, 20);`);
+        lines.push(`${indent}return { times: Array.from(times), attributes: Array.from(attributes) };`);
+      } else {
+        lines.push(`${indent}return { times: Array.from(times) };`);
+      }
+      return lines;
+    }
+  }
+
+  if (config.resultType === "EclipseWhereResult") {
+    const geoposOutput = outputReads.find(o => o.param === "geopos");
+    const attrOutput = outputReads.find(o => o.param === "attr");
+    if (geoposOutput && attrOutput) {
+      lines.push(`${indent}return {`);
+      lines.push(`${indent}  geopos: mem.getFloat64Array(${geoposOutput.varName}, 10),`);
+      lines.push(`${indent}  attributes: mem.getFloat64Array(${attrOutput.varName}, 20),`);
+      lines.push(`${indent}};`);
+      return lines;
+    }
+  }
+
+  if (config.resultType === "EclipseAttributes") {
+    const attrOutput = outputReads.find(o => o.param === "attr");
+    if (attrOutput) {
+      lines.push(`${indent}return { attributes: mem.getFloat64Array(${attrOutput.varName}, 20) };`);
+      return lines;
+    }
+  }
+
+  // Generic handling for single output
+  if (nonErrorOutputs.length === 1) {
+    const o = nonErrorOutputs[0];
+    if (o.type.type === "float64") {
+      lines.push(`${indent}return mem.getFloat64(${o.varName});`);
+    } else if (o.type.type === "int32") {
+      lines.push(`${indent}return mem.getInt32(${o.varName});`);
+    } else if (o.type.type === "string") {
+      lines.push(`${indent}return mem.getString(${o.varName});`);
+    } else if (o.type.type === "float64[]") {
+      lines.push(`${indent}return mem.getFloat64Array(${o.varName}, ${o.type.count});`);
+    } else if (o.type.type === "int32[]") {
+      const result: string[] = [];
+      lines.push(`${indent}const arr: number[] = [];`);
+      lines.push(`${indent}for (let i = 0; i < ${o.type.count}; i++) arr.push(mem.getInt32(${o.varName} + i * 4));`);
+      lines.push(`${indent}return arr;`);
+    }
+    return lines;
+  }
+
+  // Generic handling for multiple outputs - return object
+  lines.push(`${indent}return {`);
+  for (const o of nonErrorOutputs) {
+    const propName = (o.type as any).name || o.param;
+    if (o.type.type === "float64") {
+      lines.push(`${indent}  ${propName}: mem.getFloat64(${o.varName}),`);
+    } else if (o.type.type === "int32") {
+      lines.push(`${indent}  ${propName}: mem.getInt32(${o.varName}),`);
+    } else if (o.type.type === "string") {
+      lines.push(`${indent}  ${propName}: mem.getString(${o.varName}),`);
+    } else if (o.type.type === "float64[]") {
+      lines.push(`${indent}  ${propName}: mem.getFloat64Array(${o.varName}, ${o.type.count}),`);
+    }
+  }
+  lines.push(`${indent}};`);
+
+  return lines;
 }
 
 function generateExportedFunctions(functions: FunctionDecl[]): string {
@@ -616,6 +1214,12 @@ function main() {
   const functionsContent = generateFunctions(functions);
   writeFileSync(join(OUTPUT_DIR, "functions.ts"), functionsContent);
   console.log(`Generated ${join(OUTPUT_DIR, "functions.ts")}`);
+
+  // Generate friendly wrappers
+  console.log("Generating friendly wrappers...");
+  const friendlyContent = generateFriendlyWrappers(functions);
+  writeFileSync(join(OUTPUT_DIR, "friendly.ts"), friendlyContent);
+  console.log(`Generated ${join(OUTPUT_DIR, "friendly.ts")}`);
 
   // Generate index
   const indexContent = generateIndex();

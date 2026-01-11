@@ -1,53 +1,66 @@
 /**
- * Swiss Ephemeris WebAssembly bindings
+ * Swiss Ephemeris - Friendly API
  *
- * Provides direct access to the Swiss Ephemeris C library compiled to WASM.
- * All function signatures match the C API exactly.
+ * TypeScript-friendly wrapper around the Swiss Ephemeris WASM module.
+ * Handles all memory management automatically.
+ *
+ * For direct WASM access with manual memory management:
+ * ```ts
+ * import { loadSwissEph, createMemoryHelpers } from "@jyoti/swisseph/raw";
+ * ```
  *
  * @example
  * ```ts
- * import { loadSwissEph, SE_SUN, SEFLG_SPEED, createMemoryHelpers } from "@jyoti/swisseph";
+ * import { createSwissEph, SE_SUN, SEFLG_SPEED, SE_SIDM_LAHIRI } from "@jyoti/swisseph";
  *
- * const swe = await loadSwissEph();
- * const mem = createMemoryHelpers(swe);
+ * const swe = await createSwissEph();
  *
  * // Calculate Julian Day
- * const jd = swe.swe_julday(1990, 5, 15, 12.5, 1); // 1 = Gregorian
+ * const jd = swe.julday(2024, 1, 1, 12.0);
  *
- * // Calculate planet position
- * const xxPtr = swe.malloc(6 * 8); // 6 doubles for result
- * const serrPtr = swe.malloc(256); // error buffer
+ * // Calculate planet position - no memory management needed!
+ * const sun = swe.calc(jd, SE_SUN, SEFLG_SPEED);
+ * console.log(`Sun longitude: ${sun.longitude}°`);
  *
- * const result = swe.swe_calc_ut(jd, SE_SUN, SEFLG_SPEED, xxPtr, serrPtr);
+ * // Sidereal calculations
+ * swe.setSiderealMode(SE_SIDM_LAHIRI, 0, 0);
+ * const ayanamsa = swe.getAyanamsa(jd);
  *
- * if (result >= 0) {
- *   const [longitude, latitude, distance, speedLon, speedLat, speedDist] =
- *     mem.getFloat64Array(xxPtr, 6);
- *   console.log(`Sun longitude: ${longitude}°`);
- * } else {
- *   console.error(mem.getString(serrPtr));
- * }
+ * // House cusps
+ * const houses = swe.houses(jd, 0, 28.6, 77.2, "W"); // "W" for Whole Sign
+ * console.log(`Ascendant: ${houses.ascendant}°`);
  *
- * swe.free(xxPtr);
- * swe.free(serrPtr);
- * swe.swe_close();
+ * swe.close();
  * ```
  */
 
-// Loader
-export { loadSwissEph } from "./loader.js";
-export type { SwissEphWasm } from "./loader.js";
+// ============================================================================
+// Friendly API
+// ============================================================================
 
-// Memory helpers (optional)
-export {
-  createMemoryHelpers,
-  withErrorBuffer,
-  type MemoryHelpers,
-} from "./helpers.js";
+export { createSwissEph, type SwissEph } from "./generated/friendly.js";
 
-// All constants from the C header
+// Result types for the friendly API
+export type {
+  AzimuthAltitude,
+  DateComponents,
+  EclipseAttributes,
+  EclipseTimeResult,
+  EclipseWhereResult,
+  HouseResult,
+  HouseResultWithSpeed,
+  JulianDayResult,
+  NodesApsidesResult,
+  OrbitalElements,
+  PhenomenaResult,
+  PlanetPosition,
+  SplitDegrees,
+  UtcComponents,
+} from "./generated/friendly.js";
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+// All constants from the C header (SE_SUN, SEFLG_SPEED, SE_SIDM_LAHIRI, etc.)
 export * from "./generated/constants.js";
-
-// The SwissEphWasm interface type is also re-exported from generated
-// for users who want to import types separately
-export type { SwissEphWasm as SwissEph } from "./generated/functions.js";

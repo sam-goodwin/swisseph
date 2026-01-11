@@ -9,6 +9,10 @@
     ".": {
       "types": "./lib/index.d.mts",
       "import": "./lib/index.mjs"
+    },
+    "./raw": {
+      "types": "./lib/raw.d.mts",
+      "import": "./lib/raw.mjs"
     }
   },
   "files": [

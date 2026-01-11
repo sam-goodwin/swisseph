@@ -2,7 +2,7 @@ import { copyFile } from "node:fs/promises";
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: ["src/index.ts", "src/raw.ts"],
   format: ["esm"],
   dts: {
     build: true,

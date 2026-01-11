@@ -70,7 +70,7 @@ export async function loadSwissEph(): Promise<SwissEphWasm> {
     const bytes = await fs.readFile(wasmModule);
     const result = await WebAssembly.instantiate(
       bytes as unknown as BufferSource,
-      imports
+      imports,
     );
     instance = result.instance;
   } else if (

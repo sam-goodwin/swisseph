@@ -1,23 +1,23 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
-  loadSwissEph,
   createMemoryHelpers,
-  type SwissEphWasm,
+  loadSwissEph,
   type MemoryHelpers,
+  SE_GREG_CAL,
+  SE_JUPITER,
+  SE_MARS,
+  SE_MERCURY,
+  SE_MOON,
+  SE_SATURN,
+  SE_SIDM_LAHIRI,
   // Constants
   SE_SUN,
-  SE_MOON,
-  SE_MERCURY,
-  SE_VENUS,
-  SE_MARS,
-  SE_JUPITER,
-  SE_SATURN,
   SE_TRUE_NODE,
-  SE_GREG_CAL,
-  SEFLG_SPEED,
+  SE_VENUS,
   SEFLG_SIDEREAL,
-  SE_SIDM_LAHIRI,
-} from "../src/index.js";
+  SEFLG_SPEED,
+  type SwissEphWasm,
+} from "../src/raw.js";
 
 describe("SwissEph WASM", () => {
   let swe: SwissEphWasm;
@@ -76,7 +76,7 @@ describe("SwissEph WASM", () => {
         original.month,
         original.day,
         original.hour,
-        SE_GREG_CAL
+        SE_GREG_CAL,
       );
 
       const yearPtr = swe.malloc(4);
@@ -135,7 +135,13 @@ describe("SwissEph WASM", () => {
       const serrPtr = swe.malloc(256);
 
       try {
-        const result = swe.swe_calc_ut(jd, SE_MOON, SEFLG_SPEED, xxPtr, serrPtr);
+        const result = swe.swe_calc_ut(
+          jd,
+          SE_MOON,
+          SEFLG_SPEED,
+          xxPtr,
+          serrPtr,
+        );
 
         expect(result).toBeGreaterThanOrEqual(0);
 
@@ -173,7 +179,13 @@ describe("SwissEph WASM", () => {
 
       try {
         for (const planet of planets) {
-          const result = swe.swe_calc_ut(jd, planet, SEFLG_SPEED, xxPtr, serrPtr);
+          const result = swe.swe_calc_ut(
+            jd,
+            planet,
+            SEFLG_SPEED,
+            xxPtr,
+            serrPtr,
+          );
           expect(result).toBeGreaterThanOrEqual(0);
 
           const longitude = mem.getFloat64(xxPtr);
@@ -198,7 +210,7 @@ describe("SwissEph WASM", () => {
           SE_TRUE_NODE,
           SEFLG_SPEED,
           xxPtr,
-          serrPtr
+          serrPtr,
         );
 
         expect(result).toBeGreaterThanOrEqual(0);
@@ -233,7 +245,7 @@ describe("SwissEph WASM", () => {
           SE_SUN,
           SEFLG_SPEED | SEFLG_SIDEREAL,
           xxSiderealPtr,
-          serrPtr
+          serrPtr,
         );
         const siderealLon = mem.getFloat64(xxSiderealPtr);
 
@@ -274,7 +286,7 @@ describe("SwissEph WASM", () => {
           lon,
           hsys,
           cuspsPtr,
-          ascmcPtr
+          ascmcPtr,
         );
 
         expect(result).toBeGreaterThanOrEqual(0);
